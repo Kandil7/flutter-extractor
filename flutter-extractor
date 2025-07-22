@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # Flutter Code Extractor CLI Tool
-# A global CLI tool to extract and recreate Flutter apps
-# Version: 1.1.0
+# A global CLI tool to extract and recreate Flutter apps with feature-based architecture
+# Version: 2.0.0
 
 set -e
 
-VERSION="1.1.0"
+VERSION="2.0.0"
 TOOL_NAME="flutter-extractor"
 
 # Colors for output
@@ -54,7 +54,7 @@ show_help() {
     echo "  $TOOL_NAME [COMMAND] [OPTIONS]"
     echo ""
     echo "COMMANDS:"
-    echo "  extract     Extract Flutter app code to a generator script"
+    echo "  extract     Extract Flutter app code to generator scripts"
     echo "  install     Install this CLI tool globally"
     echo "  uninstall   Remove this CLI tool from system"
     echo "  version     Show version information"
@@ -62,19 +62,47 @@ show_help() {
     echo ""
     echo "EXTRACT OPTIONS:"
     echo "  -s, --source DIR        Source directory (default: current directory)"
-    echo "  -o, --output FILE       Output script name (default: generate_flutter_app.sh)"
+    echo "  -o, --output DIR        Output directory for generated scripts (default: flutter_extract)"
     echo "  -n, --name NAME         Default app name in generator (default: extracted_flutter_app)"
     echo "  -p, --pubspec           Include pubspec.yaml in extraction"
     echo "  -a, --assets            Include assets folder in extraction"
     echo "  -c, --config            Include analysis_options.yaml and .gitignore"
-    echo "  -f, --force             Overwrite existing output file"
+    echo "  -t, --tests             Include test files in extraction"
+    echo "  -f, --force             Overwrite existing output files"
     echo "  -v, --verbose           Verbose output"
+    echo "  --features              Enable feature-based extraction (default)"
+    echo "  --monolith             Create single monolithic script instead of features"
+    echo "  --recreate             Force recreation mode instead of update mode"
+    echo "  --feature-pattern GLOB  Pattern to identify features (default: 'features/*')"
+    echo ""
+    echo "FEATURE EXTRACTION:"
+    echo "  By default, the tool extracts in feature-based mode:"
+    echo "  - Each feature gets its own generator script"
+    echo "  - Shared components go to 'shared' feature"
+    echo "  - Main runner script orchestrates everything"
+    echo "  - Update mode is default (preserves existing files)"
     echo ""
     echo "EXAMPLES:"
-    echo "  $TOOL_NAME extract                          # Basic extraction from current dir"
-    echo "  $TOOL_NAME extract -p -a -c                 # Include pubspec, assets, and config"
-    echo "  $TOOL_NAME extract -o my_app_backup.sh      # Custom output name"
-    echo "  $TOOL_NAME extract -s ./my_project -n MyApp # Custom source and app name"
+    echo "  $TOOL_NAME extract                              # Feature-based extraction with updates"
+    echo "  $TOOL_NAME extract -p -a -c -t                  # Include all extras"
+    echo "  $TOOL_NAME extract --recreate                   # Force recreation mode"
+    echo "  $TOOL_NAME extract --monolith                   # Single script mode"
+    echo "  $TOOL_NAME extract -o my_backup --force         # Custom output with overwrite"
+    echo "  $TOOL_NAME extract --feature-pattern 'modules/*' # Custom feature pattern"
+    echo ""
+    echo "OUTPUT STRUCTURE:"
+    echo "  flutter_extract/"
+    echo "  ├── flutter_app_builder.sh      # Main runner script"
+    echo "  ├── features/"
+    echo "  │   ├── core_feature.sh         # Core/shared components"
+    echo "  │   ├── auth_feature.sh         # Authentication feature"
+    echo "  │   ├── home_feature.sh         # Home feature"
+    echo "  │   └── ..."
+    echo "  ├── config/"
+    echo "  │   ├── pubspec_config.sh       # Pubspec configuration"
+    echo "  │   ├── assets_config.sh        # Assets configuration"
+    echo "  │   └── project_config.sh       # Project configuration"
+    echo "  └── README.md                   # Usage instructions"
     echo ""
 }
 
@@ -83,6 +111,7 @@ show_version() {
     print_header
     echo "Flutter Code Extractor CLI v$VERSION"
     echo "A tool to extract and recreate Flutter applications"
+    echo "Features: Modular extraction, incremental updates, feature-based architecture"
     echo ""
 }
 
@@ -181,7 +210,6 @@ uninstall_cli() {
 
 # Function to escape content for bash heredoc
 escape_for_heredoc() {
-    # Escape single quotes and backslashes properly
     sed "s/\\\\/\\\\\\\\/g" | sed "s/'/'\\\\''/g"
 }
 
@@ -189,14 +217,12 @@ escape_for_heredoc() {
 validate_flutter_project() {
     local dir="$1"
     
-    # Check if it's a Flutter project root
     if [ -f "$dir/pubspec.yaml" ]; then
         if grep -q "flutter:" "$dir/pubspec.yaml" 2>/dev/null; then
             return 0
         fi
     fi
     
-    # Check if lib directory exists
     if [ -d "$dir/lib" ]; then
         return 0
     fi
@@ -211,113 +237,338 @@ get_relative_path() {
     echo "${file_path#$base_path/}"
 }
 
-# Main extraction function
-extract_flutter_app() {
-    local source_dir="."
-    local output_script="generate_flutter_app.sh"
-    local app_name="extracted_flutter_app"
-    local include_pubspec=false
-    local include_assets=false
-    local include_config=false
-    local force_overwrite=false
-    local verbose=false
+# Function to extract feature name from path
+extract_feature_name() {
+    local file_path="$1"
+    local feature_pattern="$2"
     
-    # Parse options
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            -s|--source)
-                if [ -z "$2" ] || [[ "$2" == -* ]]; then
-                    print_error "Option $1 requires an argument"
-                    exit 1
-                fi
-                source_dir="$2"
-                shift 2
+    # Remove lib/ prefix if present
+    local clean_path="${file_path#lib/}"
+    
+    # Check if it matches feature pattern
+    if [[ "$clean_path" == $feature_pattern* ]]; then
+        # Extract feature name (first directory after pattern)
+        local feature_part="${clean_path#${feature_pattern%/*}/}"
+        echo "${feature_part%%/*}"
+    else
+        # Check common patterns
+        case "$clean_path" in
+            features/*)
+                echo "${clean_path#features/}" | cut -d'/' -f1
                 ;;
-            -o|--output)
-                if [ -z "$2" ] || [[ "$2" == -* ]]; then
-                    print_error "Option $1 requires an argument"
-                    exit 1
-                fi
-                output_script="$2"
-                shift 2
+            modules/*)
+                echo "${clean_path#modules/}" | cut -d'/' -f1
                 ;;
-            -n|--name)
-                if [ -z "$2" ] || [[ "$2" == -* ]]; then
-                    print_error "Option $1 requires an argument"
-                    exit 1
-                fi
-                app_name="$2"
-                shift 2
+            screens/*)
+                echo "${clean_path#screens/}" | cut -d'/' -f1
                 ;;
-            -p|--pubspec)
-                include_pubspec=true
-                shift
+            pages/*)
+                echo "${clean_path#pages/}" | cut -d'/' -f1
                 ;;
-            -a|--assets)
-                include_assets=true
-                shift
+            widgets/*)
+                echo "widgets"
                 ;;
-            -c|--config)
-                include_config=true
-                shift
+            components/*)
+                echo "components"
                 ;;
-            -f|--force)
-                force_overwrite=true
-                shift
+            services/*)
+                echo "services"
                 ;;
-            -v|--verbose)
-                verbose=true
-                shift
+            models/*)
+                echo "models"
+                ;;
+            utils/*)
+                echo "utils"
                 ;;
             *)
-                print_error "Unknown option: $1"
-                echo ""
-                show_help
-                exit 1
+                echo "core"
                 ;;
         esac
-    done
-    
-    # Resolve absolute path
-    source_dir=$(cd "$source_dir" 2>/dev/null && pwd) || {
-        print_error "Source directory '$source_dir' not found or inaccessible!"
-        exit 1
-    }
-    
-    # Validate Flutter project
-    if ! validate_flutter_project "$source_dir"; then
-        print_warning "The source directory doesn't appear to be a Flutter project"
-        print_status "Continuing anyway, but results may not work correctly"
     fi
+}
+
+# Function to create feature generator script
+create_feature_script() {
+    local feature_name="$1"
+    local output_dir="$2"
+    local feature_files="$3"
+    local update_mode="$4"
     
-    # Check if output file exists
-    if [ -f "$output_script" ] && [ "$force_overwrite" != true ]; then
-        print_error "Output file '$output_script' already exists!"
-        print_status "Use -f or --force to overwrite"
-        exit 1
-    fi
+    local script_path="$output_dir/features/${feature_name}_feature.sh"
     
-    # Validate app name
-    if [[ ! "$app_name" =~ ^[a-z][a-z0-9_]*$ ]]; then
-        print_warning "App name '$app_name' may not be valid for Flutter"
-        print_status "Flutter app names should be lowercase with underscores"
-    fi
-    
-    print_header
-    print_status "Extracting Flutter app code..."
-    [ "$verbose" = true ] && print_status "Source directory: $source_dir"
-    [ "$verbose" = true ] && print_status "Output script: $output_script"
-    [ "$verbose" = true ] && print_status "Default app name: $app_name"
-    
-    # Create temporary file first, then move to final location
-    local temp_script="${output_script}.tmp"
-    
-    # Start creating the generator script
-    cat > "$temp_script" << 'GENERATOR_SCRIPT_START'
+    cat > "$script_path" << EOF
 #!/bin/bash
 
-# Generated Flutter App Recreation Script
-# Created by Flutter Code Extractor CLI
+# ${feature_name^} Feature Generator
+# Auto-generated by Flutter Code Extractor v$VERSION
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+print_status() {
+    echo -e "\${BLUE}[${feature_name^^}]\${NC} \$1"
+}
+
+print_success() {
+    echo -e "\${GREEN}[${feature_name^^}]\${NC} \$1"
+}
+
+print_warning() {
+    echo -e "\${YELLOW}[${feature_name^^}]\${NC} \$1"
+}
+
+# Feature: $feature_name
+generate_${feature_name}_feature() {
+    local app_dir="\$1"
+    local update_mode="\${2:-${update_mode}}"
+    
+    print_status "Generating $feature_name feature..."
+    
+    cd "\$app_dir"
+    
+EOF
+
+    # Add file generation logic
+    echo "$feature_files" | while IFS='|' read -r file_path file_content; do
+        [ -z "$file_path" ] && continue
+        
+        local dir_path=$(dirname "$file_path")
+        
+        cat >> "$script_path" << EOF
+    
+    # Create: $file_path
+    if [ "\$update_mode" = "true" ] && [ -f "$file_path" ]; then
+        print_warning "Skipping existing file: $file_path (update mode)"
+    else
+        $([ "$dir_path" != "." ] && echo "mkdir -p \"$dir_path\"")
+        cat > '$file_path' << 'FEATURE_FILE_EOF'
+$file_content
+FEATURE_FILE_EOF
+        print_status "Created: $file_path"
+    fi
+EOF
+    done
+    
+    cat >> "$script_path" << 'EOF'
+    
+    print_success "$feature_name feature generated successfully!"
+}
+
+# Run feature generation if script is executed directly
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    if [ -z "$1" ]; then
+        echo "Usage: $0 <app_directory> [update_mode]"
+        echo "  app_directory: Path to Flutter app directory"
+        echo "  update_mode: true/false (default: true)"
+        exit 1
+    fi
+    
+    generate_${feature_name}_feature "$1" "${2:-true}"
+fi
+EOF
+    
+    chmod +x "$script_path"
+}
+
+# Function to create config script
+create_config_script() {
+    local config_name="$1"
+    local output_dir="$2"
+    local config_content="$3"
+    local file_path="$4"
+    
+    local script_path="$output_dir/config/${config_name}_config.sh"
+    
+    cat > "$script_path" << EOF
+#!/bin/bash
+
+# ${config_name^} Configuration
+# Auto-generated by Flutter Code Extractor v$VERSION
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+print_status() {
+    echo -e "\${BLUE}[CONFIG]\${NC} \$1"
+}
+
+print_success() {
+    echo -e "\${GREEN}[CONFIG]\${NC} \$1"
+}
+
+print_warning() {
+    echo -e "\${YELLOW}[CONFIG]\${NC} \$1"
+}
+
+# Apply $config_name configuration
+apply_${config_name}_config() {
+    local app_dir="\$1"
+    local update_mode="\${2:-true}"
+    
+    print_status "Applying $config_name configuration..."
+    
+    cd "\$app_dir"
+    
+    if [ "\$update_mode" = "true" ] && [ -f "$file_path" ]; then
+        print_warning "Skipping existing file: $file_path (update mode)"
+    else
+        cat > '$file_path' << 'CONFIG_EOF'
+$config_content
+CONFIG_EOF
+        print_success "Applied $config_name configuration: $file_path"
+    fi
+}
+
+# Run config application if script is executed directly
+if [ "\${BASH_SOURCE[0]}" = "\${0}" ]; then
+    if [ -z "\$1" ]; then
+        echo "Usage: \$0 <app_directory> [update_mode]"
+        echo "  app_directory: Path to Flutter app directory"
+        echo "  update_mode: true/false (default: true)"
+        exit 1
+    fi
+    
+    apply_${config_name}_config "\$1" "\${2:-true}"
+fi
+EOF
+    
+    chmod +x "$script_path"
+}
+
+# Function to create assets config script
+create_assets_script() {
+    local output_dir="$1"
+    local source_dir="$2"
+    
+    local script_path="$output_dir/config/assets_config.sh"
+    
+    cat > "$script_path" << 'EOF'
+#!/bin/bash
+
+# Assets Configuration
+# Auto-generated by Flutter Code Extractor v$VERSION
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+print_status() {
+    echo -e "${BLUE}[ASSETS]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[ASSETS]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[ASSETS]${NC} $1"
+}
+
+# Apply assets
+apply_assets_config() {
+    local app_dir="$1"
+    local update_mode="${2:-true}"
+    
+    print_status "Applying assets configuration..."
+    
+    cd "$app_dir"
+    
+    # Remove existing assets if not in update mode
+    if [ "$update_mode" != "true" ]; then
+        rm -rf assets
+    fi
+    
+    mkdir -p assets
+    
+EOF
+
+    # Add assets
+    if [ -d "$source_dir/assets" ]; then
+        local assets_count=0
+        while IFS= read -r -d '' file; do
+            local relative_path=$(get_relative_path "$file" "$source_dir/assets")
+            local dir_path=$(dirname "$relative_path")
+            
+            cat >> "$script_path" << EOF
+    
+    # Asset: assets/$relative_path
+    if [ "\$update_mode" = "true" ] && [ -f "assets/$relative_path" ]; then
+        print_warning "Skipping existing asset: assets/$relative_path (update mode)"
+    else
+        $([ "$dir_path" != "." ] && echo "mkdir -p \"assets/$dir_path\"")
+EOF
+
+            if file "$file" | grep -q "text"; then
+                echo "        cat > 'assets/$relative_path' << 'ASSET_EOF'" >> "$script_path"
+                escape_for_heredoc < "$file" >> "$script_path"
+                echo "" >> "$script_path"
+                echo "ASSET_EOF" >> "$script_path"
+            else
+                echo "        base64 -d << 'ASSET_EOF' > 'assets/$relative_path'" >> "$script_path"
+                base64 < "$file" >> "$script_path"
+                echo "ASSET_EOF" >> "$script_path"
+            fi
+            
+            echo "        print_status \"Created asset: assets/$relative_path\"" >> "$script_path"
+            echo "    fi" >> "$script_path"
+            
+            ((assets_count++))
+        done < <(find "$source_dir/assets" -type f -print0 2>/dev/null || true)
+        
+        echo "    print_success \"Processed $assets_count asset files\"" >> "$script_path"
+    fi
+    
+    cat >> "$script_path" << 'EOF'
+}
+
+# Run assets application if script is executed directly
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    if [ -z "$1" ]; then
+        echo "Usage: $0 <app_directory> [update_mode]"
+        echo "  app_directory: Path to Flutter app directory"
+        echo "  update_mode: true/false (default: true)"
+        exit 1
+    fi
+    
+    apply_assets_config "$1" "${2:-true}"
+fi
+EOF
+    
+    chmod +x "$script_path"
+}
+
+# Function to create main builder script
+create_main_builder() {
+    local output_dir="$1"
+    local app_name="$2"
+    local feature_scripts="$3"
+    local config_scripts="$4"
+    local update_mode="$5"
+    
+    local script_path="$output_dir/flutter_app_builder.sh"
+    
+    cat > "$script_path" << EOF
+#!/bin/bash
+
+# Flutter App Builder - Main Script
+# Auto-generated by Flutter Code Extractor v$VERSION
+# 
+# This script orchestrates the creation/update of a Flutter app
+# using feature-based architecture with modular components.
 
 set -e
 
@@ -327,58 +578,91 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 print_header() {
-    echo -e "${PURPLE}╭─────────────────────────────────────────╮${NC}"
-    echo -e "${PURPLE}│      Flutter App Generator Script      │${NC}"
-    echo -e "${PURPLE}╰─────────────────────────────────────────╯${NC}"
+    echo -e "\${PURPLE}╭─────────────────────────────────────────╮\${NC}"
+    echo -e "\${PURPLE}│      Flutter App Builder Script        │\${NC}"
+    echo -e "\${PURPLE}│         Feature-Based Architecture     │\${NC}"
+    echo -e "\${PURPLE}╰─────────────────────────────────────────╯\${NC}"
     echo ""
 }
 
 print_status() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    echo -e "\${BLUE}[MAIN]\${NC} \$1"
 }
 
 print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "\${GREEN}[MAIN]\${NC} \$1"
 }
 
 print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "\${RED}[MAIN]\${NC} \$1"
 }
 
 print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo -e "\${YELLOW}[MAIN]\${NC} \$1"
 }
 
 # Show help
 show_help() {
-    echo "USAGE: $0 [app_name] [options]"
+    echo "USAGE: \$0 [app_name] [options]"
     echo ""
     echo "OPTIONS:"
-    echo "  -h, --help      Show this help"
-    echo "  --skip-deps     Skip flutter pub get"
-    echo "  --skip-doctor   Skip flutter doctor"
-    echo "  --clean         Remove existing directory if it exists"
+    echo "  -h, --help          Show this help"
+    echo "  --update            Update mode - preserve existing files (default)"
+    echo "  --recreate          Recreate mode - overwrite existing files"
+    echo "  --skip-deps         Skip flutter pub get"
+    echo "  --skip-doctor       Skip flutter doctor"
+    echo "  --clean             Remove existing directory if it exists"
+    echo "  --features-only     Only generate features (skip config)"
+    echo "  --config-only       Only apply configuration (skip features)"
+    echo "  --list-features     List available features and exit"
     echo ""
-    echo "EXAMPLE:"
-    echo "  $0 my_awesome_app"
-    echo "  $0 my_app --clean --skip-doctor"
+    echo "EXAMPLES:"
+    echo "  \$0 my_awesome_app                    # Create/update with default settings"
+    echo "  \$0 my_app --recreate                # Force recreate all files"
+    echo "  \$0 existing_app --update            # Update existing app (default)"
+    echo "  \$0 my_app --features-only           # Only generate features"
+    echo ""
+    echo "AVAILABLE FEATURES:"
+EOF
+
+    # List features
+    echo "$feature_scripts" | while IFS= read -r script; do
+        [ -z "$script" ] && continue
+        local feature_name=$(basename "$script" _feature.sh)
+        echo "  - $feature_name" >> "$script_path"
+    done
+    
+    cat >> "$script_path" << 'EOF'
     echo ""
 }
 
 # Parse arguments
 APP_NAME=""
+UPDATE_MODE="true"
 SKIP_DEPS=false
 SKIP_DOCTOR=false
 CLEAN_EXISTING=false
+FEATURES_ONLY=false
+CONFIG_ONLY=false
+LIST_FEATURES=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         -h|--help)
             show_help
             exit 0
+            ;;
+        --update)
+            UPDATE_MODE="true"
+            shift
+            ;;
+        --recreate)
+            UPDATE_MODE="false"
+            shift
             ;;
         --skip-deps)
             SKIP_DEPS=true
@@ -392,14 +676,26 @@ while [[ $# -gt 0 ]]; do
             CLEAN_EXISTING=true
             shift
             ;;
+        --features-only)
+            FEATURES_ONLY=true
+            shift
+            ;;
+        --config-only)
+            CONFIG_ONLY=true
+            shift
+            ;;
+        --list-features)
+            LIST_FEATURES=true
+            shift
+            ;;
         -*)
-            print_error "Unknown option: $1"
+            print_error "Unknown option: \$1"
             show_help
             exit 1
             ;;
         *)
-            if [ -z "$APP_NAME" ]; then
-                APP_NAME="$1"
+            if [ -z "\$APP_NAME" ]; then
+                APP_NAME="\$1"
             else
                 print_error "Multiple app names specified"
                 exit 1
@@ -409,17 +705,25 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-GENERATOR_SCRIPT_START
+# Set default app name
+APP_NAME="\${APP_NAME:-$app_name}"
 
-    # Add default app name to generator
-    echo "# Set default app name if not provided" >> "$temp_script"
-    echo "APP_NAME=\"\${APP_NAME:-$app_name}\"" >> "$temp_script"
-    echo "" >> "$temp_script"
+# List features and exit if requested
+if [ "\$LIST_FEATURES" = true ]; then
+    echo "Available features:"
+EOF
+
+    echo "$feature_scripts" | while IFS= read -r script; do
+        [ -z "$script" ] && continue
+        local feature_name=$(basename "$script" _feature.sh)
+        echo "    echo \"  - $feature_name\"" >> "$script_path"
+    done
     
-    # Add main generation logic
-    cat >> "$temp_script" << 'GENERATOR_MAIN_START'
+    cat >> "$script_path" << 'EOF'
+    exit 0
+fi
+
 print_header
-print_status "Creating Flutter app: $APP_NAME"
 
 # Validate app name
 if [[ ! "$APP_NAME" =~ ^[a-z][a-z0-9_]*$ ]]; then
@@ -435,146 +739,95 @@ if ! command -v flutter &> /dev/null; then
     exit 1
 fi
 
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+print_status "Building Flutter app: $APP_NAME"
+if [ "$UPDATE_MODE" = "true" ]; then
+    print_status "Mode: Update (preserve existing files)"
+else
+    print_status "Mode: Recreate (overwrite existing files)"
+fi
+
 # Handle existing directory
 if [ -d "$APP_NAME" ]; then
     if [ "$CLEAN_EXISTING" = true ]; then
         print_warning "Removing existing directory: $APP_NAME"
         rm -rf "$APP_NAME"
-    else
+        UPDATE_MODE="false"  # Force recreate mode if we cleaned
+    elif [ "$UPDATE_MODE" = "false" ]; then
         print_error "Directory '$APP_NAME' already exists!"
-        print_status "Use --clean flag to remove it automatically"
+        print_status "Use --clean flag to remove it automatically or --update to update existing files"
+        exit 1
+    else
+        print_status "Updating existing Flutter app: $APP_NAME"
+    fi
+else
+    UPDATE_MODE="false"  # Force recreate mode for new projects
+fi
+
+# Create new Flutter app if it doesn't exist
+if [ ! -d "$APP_NAME" ]; then
+    print_status "Creating new Flutter project..."
+    if ! flutter create "$APP_NAME" --quiet; then
+        print_error "Failed to create Flutter project"
         exit 1
     fi
+    
+    # Remove default files
+    rm -f "$APP_NAME/lib/main.dart"
+    [ -d "$APP_NAME/test" ] && rm -rf "$APP_NAME/test"/*
 fi
 
-# Create new Flutter app
-print_status "Creating new Flutter project..."
-if ! flutter create "$APP_NAME" --quiet; then
-    print_error "Failed to create Flutter project"
-    exit 1
+APP_DIR="$(cd "$APP_NAME" && pwd)"
+
+# Apply configurations
+if [ "$FEATURES_ONLY" != true ]; then
+    print_status "Applying configurations..."
+EOF
+
+    # Add config script calls
+    echo "$config_scripts" | while IFS= read -r script; do
+        [ -z "$script" ] && continue
+        local script_name=$(basename "$script")
+        cat >> "$script_path" << EOF
+    
+    if [ -f "\$SCRIPT_DIR/config/$script_name" ]; then
+        source "\$SCRIPT_DIR/config/$script_name"
+        ${script_name%.*} "\$APP_DIR" "\$UPDATE_MODE"
+    fi
+EOF
+    done
 fi
 
-cd "$APP_NAME"
+cat >> "$script_path" << 'EOF'
 
-# Remove default files
-rm -f lib/main.dart
-[ -d "test" ] && rm -rf test/*
+# Generate features
+if [ "$CONFIG_ONLY" != true ]; then
+    print_status "Generating features..."
+EOF
 
-print_status "Generating app structure and code..."
+    # Add feature script calls
+    echo "$feature_scripts" | while IFS= read -r script; do
+        [ -z "$script" ] && continue
+        local script_name=$(basename "$script")
+        local feature_name=$(basename "$script" _feature.sh)
+        cat >> "$script_path" << EOF
+    
+    if [ -f "\$SCRIPT_DIR/features/$script_name" ]; then
+        source "\$SCRIPT_DIR/features/$script_name"
+        generate_${feature_name}_feature "\$APP_DIR" "\$UPDATE_MODE"
+    fi
+EOF
+    done
+fi
 
-GENERATOR_MAIN_START
-
-    # Process pubspec.yaml if requested
-    if [ "$include_pubspec" = true ] && [ -f "$source_dir/pubspec.yaml" ]; then
-        [ "$verbose" = true ] && print_status "Including pubspec.yaml"
-        echo "# Replace pubspec.yaml" >> "$temp_script"
-        echo "cat > 'pubspec.yaml' << 'PUBSPEC_EOF'" >> "$temp_script"
-        escape_for_heredoc < "$source_dir/pubspec.yaml" >> "$temp_script"
-        echo "" >> "$temp_script"
-        echo "PUBSPEC_EOF" >> "$temp_script"
-        echo "print_status \"Updated pubspec.yaml\"" >> "$temp_script"
-        echo "" >> "$temp_script"
-    fi
-    
-    # Process config files if requested
-    if [ "$include_config" = true ]; then
-        if [ -f "$source_dir/analysis_options.yaml" ]; then
-            [ "$verbose" = true ] && print_status "Including analysis_options.yaml"
-            echo "# Add analysis_options.yaml" >> "$temp_script"
-            echo "cat > 'analysis_options.yaml' << 'ANALYSIS_EOF'" >> "$temp_script"
-            escape_for_heredoc < "$source_dir/analysis_options.yaml" >> "$temp_script"
-            echo "" >> "$temp_script"
-            echo "ANALYSIS_EOF" >> "$temp_script"
-            echo "print_status \"Created analysis_options.yaml\"" >> "$temp_script"
-            echo "" >> "$temp_script"
-        fi
-        
-        if [ -f "$source_dir/.gitignore" ]; then
-            [ "$verbose" = true ] && print_status "Including .gitignore"
-            echo "# Add .gitignore" >> "$temp_script"
-            echo "cat > '.gitignore' << 'GITIGNORE_EOF'" >> "$temp_script"
-            escape_for_heredoc < "$source_dir/.gitignore" >> "$temp_script"
-            echo "" >> "$temp_script"
-            echo "GITIGNORE_EOF" >> "$temp_script"
-            echo "print_status \"Updated .gitignore\"" >> "$temp_script"
-            echo "" >> "$temp_script"
-        fi
-    fi
-    
-    # Process Dart files from lib directory
-    local lib_dir="$source_dir/lib"
-    local dart_files_count=0
-    
-    if [ -d "$lib_dir" ]; then
-        while IFS= read -r -d '' file; do
-            local relative_path=$(get_relative_path "$file" "$lib_dir")
-            local dir_path=$(dirname "$relative_path")
-            
-            [ "$verbose" = true ] && print_status "Processing: lib/$relative_path"
-            
-            # Create directory if needed
-            if [ "$dir_path" != "." ]; then
-                echo "mkdir -p \"lib/$dir_path\"" >> "$temp_script"
-            fi
-            
-            # Add file content
-            echo "cat > 'lib/$relative_path' << 'DART_EOF'" >> "$temp_script"
-            escape_for_heredoc < "$file" >> "$temp_script"
-            echo "" >> "$temp_script"
-            echo "DART_EOF" >> "$temp_script"
-            echo "print_status \"Created: lib/$relative_path\"" >> "$temp_script"
-            echo "" >> "$temp_script"
-            
-            ((dart_files_count++))
-        done < <(find "$lib_dir" -name "*.dart" -type f -print0 2>/dev/null || true)
-    fi
-    
-    # Process assets if requested
-    local assets_count=0
-    if [ "$include_assets" = true ] && [ -d "$source_dir/assets" ]; then
-        [ "$verbose" = true ] && print_status "Including assets folder"
-        echo "# Copy assets" >> "$temp_script"
-        echo "rm -rf assets" >> "$temp_script"
-        echo "mkdir -p assets" >> "$temp_script"
-        echo "" >> "$temp_script"
-        
-        while IFS= read -r -d '' file; do
-            local relative_path=$(get_relative_path "$file" "$source_dir/assets")
-            local dir_path=$(dirname "$relative_path")
-            
-            [ "$verbose" = true ] && print_status "Processing asset: assets/$relative_path"
-            
-            if [ "$dir_path" != "." ]; then
-                echo "mkdir -p \"assets/$dir_path\"" >> "$temp_script"
-            fi
-            
-            # Check if file is binary or text
-            if file "$file" | grep -q "text"; then
-                # Text file - use cat with heredoc
-                echo "cat > 'assets/$relative_path' << 'ASSET_EOF'" >> "$temp_script"
-                escape_for_heredoc < "$file" >> "$temp_script"
-                echo "" >> "$temp_script"
-                echo "ASSET_EOF" >> "$temp_script"
-            else
-                # Binary file - use base64 encoding
-                echo "base64 -d << 'ASSET_EOF' > 'assets/$relative_path'" >> "$temp_script"
-                base64 < "$file" >> "$temp_script"
-                echo "ASSET_EOF" >> "$temp_script"
-            fi
-            
-            echo "print_status \"Created: assets/$relative_path\"" >> "$temp_script"
-            echo "" >> "$temp_script"
-            
-            ((assets_count++))
-        done < <(find "$source_dir/assets" -type f -print0 2>/dev/null || true)
-    fi
-    
-    # Add final steps
-    cat >> "$temp_script" << 'GENERATOR_END'
+cat >> "$script_path" << 'EOF'
 
 # Final steps
 if [ "$SKIP_DEPS" != true ]; then
     print_status "Getting Flutter packages..."
+    cd "$APP_DIR"
     if ! flutter pub get; then
         print_warning "flutter pub get failed, but continuing..."
     fi
@@ -585,60 +838,298 @@ if [ "$SKIP_DOCTOR" != true ]; then
     flutter doctor || print_warning "Flutter doctor reported issues, but app was created"
 fi
 
-print_success "Flutter app '$APP_NAME' created successfully!"
+print_success "Flutter app '$APP_NAME' built successfully!"
+print_status "Location: $APP_DIR"
+print_status ""
 print_status "To run the app:"
 print_status "  cd $APP_NAME"
 print_status "  flutter run"
+print_status ""
+if [ "$UPDATE_MODE" = "true" ]; then
+    print_status "Note: Update mode was used. Some files may have been preserved."
+    print_status "Use --recreate to force overwrite all files."
+fi
 echo ""
+EOF
 
-GENERATOR_END
-
-    # Move temp file to final location and set permissions
-    mv "$temp_script" "$output_script"
-    chmod +x "$output_script"
+    chmod +x "$script_path"
+}
+# Function to create README
+create_readme() {
+    local output_dir="$1"
+    local app_name="$2"
+    local feature_list="$3"
+    local config_list="$4"
+    local extraction_stats="$5"
     
-    echo ""
-    print_success "Extraction completed!"
-    print_status "Found and processed $dart_files_count Dart files"
-    [ "$include_pubspec" = true ] && print_status "Included pubspec.yaml"
-    [ "$include_assets" = true ] && print_status "Included $assets_count asset files"
-    [ "$include_config" = true ] && print_status "Included configuration files"
-    print_success "Generator script created: $output_script"
-    echo ""
-    print_status "To recreate the Flutter app:"
-    print_command "./$output_script [app_name]"
-    echo ""
-}
+    cat > "$output_dir/README.md" << EOF
+# Flutter App Extractor Bundle
 
-# Main command dispatcher
-main() {
-    case "${1:-help}" in
-        extract)
-            shift
-            extract_flutter_app "$@"
-            ;;
-        install)
-            install_cli
-            ;;
-        uninstall)
-            uninstall_cli
-            ;;
-        version)
-            show_version
-            ;;
-        help|--help|-h)
-            show_help
-            ;;
-        *)
-            if [ -n "$1" ]; then
-                print_error "Unknown command: $1"
-                echo ""
-            fi
-            show_help
-            exit 1
-            ;;
-    esac
-}
+This bundle was generated by Flutter Code Extractor v$VERSION and contains everything needed to recreate your Flutter application with feature-based architecture.
 
-# Run main function with all arguments
-main "$@"
+## 🚀 Quick Start
+
+\`\`\`bash
+# Create new app (update mode - default)
+./flutter_app_builder.sh my_awesome_app
+
+# Force recreate all files
+./flutter_app_builder.sh my_app --recreate
+
+# Update existing app
+./flutter_app_builder.sh existing_app --update
+\`\`\`
+
+## 📁 Structure
+
+\`\`\`
+$(basename "$output_dir")/
+├── flutter_app_builder.sh      # 🎯 Main runner script
+├── features/                   # 🧩 Feature modules
+│   ├── core_feature.sh         # Core/shared components$(echo "$feature_list" | while IFS= read -r feature; do
+    [ -n "$feature" ] && echo "│   ├── ${feature}_feature.sh         # ${feature^} feature module"
+done)
+├── config/                     # ⚙️ Configuration scripts$(echo "$config_list" | while IFS= read -r config; do
+    [ -n "$config" ] && echo "│   ├── ${config}_config.sh       # ${config^} configuration"
+done)
+└── README.md                   # 📖 This file
+\`\`\`
+
+## 🛠️ Usage Options
+
+### Basic Usage
+\`\`\`bash
+./flutter_app_builder.sh [app_name] [options]
+\`\`\`
+
+### Available Options
+- \`--update\` - Update mode (preserve existing files) **[Default]**
+- \`--recreate\` - Force recreate mode (overwrite all files)
+- \`--clean\` - Remove existing directory if it exists
+- \`--skip-deps\` - Skip \`flutter pub get\`
+- \`--skip-doctor\` - Skip \`flutter doctor\`
+- \`--features-only\` - Only generate features (skip config)
+- \`--config-only\` - Only apply configuration (skip features)
+- \`--list-features\` - List all available features
+
+### Examples
+
+\`\`\`bash
+# Create a new app with default settings
+./flutter_app_builder.sh my_flutter_app
+
+# Force recreation of an existing app
+./flutter_app_builder.sh existing_app --recreate --clean
+
+# Update only the features, skip configuration
+./flutter_app_builder.sh my_app --features-only --update
+
+# Apply only configuration changes
+./flutter_app_builder.sh my_app --config-only
+
+# Create app without running flutter pub get
+./flutter_app_builder.sh my_app --skip-deps
+
+# List all available features
+./flutter_app_builder.sh --list-features
+\`\`\`
+
+## 🧩 Available Features
+
+$(echo "$feature_list" | while IFS= read -r feature; do
+    [ -n "$feature" ] && echo "- **${feature^}** - \`./features/${feature}_feature.sh\`"
+done)
+
+## ⚙️ Configuration Modules
+
+$(echo "$config_list" | while IFS= read -r config; do
+    [ -n "$config" ] && echo "- **${config^}** - \`./config/${config}_config.sh\`"
+done)
+
+## 🔧 Individual Scripts Usage
+
+Each feature and configuration script can be run independently:
+
+### Feature Scripts
+\`\`\`bash
+# Run individual feature
+cd features/
+./<feature>_feature.sh /path/to/flutter/app [update_mode]
+
+# Examples$(echo "$feature_list" | head -2 | while IFS= read -r feature; do
+    [ -n "$feature" ] && echo "./${feature}_feature.sh ../my_app true  # Update mode"
+done)
+\`\`\`
+
+### Configuration Scripts
+\`\`\`bash
+# Run individual configuration
+cd config/$(echo "$config_list" | head -2 | while IFS= read -r config; do
+    [ -n "$config" ] && echo "./${config}_config.sh /path/to/flutter/app [update_mode]"
+done)
+\`\`\`
+
+## 🧩 Feature-Based Architecture
+
+This extractor uses a **feature-based architecture** approach:
+
+### Features Organization
+- **Core Feature**: Shared components, utilities, and common code
+- **Domain Features**: Business logic grouped by functionality
+- **Modular Design**: Each feature is self-contained and independently executable
+
+### Update vs Recreate Mode
+
+#### Update Mode (Default)
+- ✅ Preserves existing files to avoid overwriting changes
+- ✅ Perfect for iterative development
+- ✅ Warns when skipping existing files
+- ✅ Use when adding new features without losing modifications
+
+#### Recreate Mode
+- ✅ Overwrites all existing files
+- ✅ Use when you want a fresh start
+- ✅ Ideal for initial extraction or major updates
+- ✅ Ensures exact replication of original codebase
+
+## 📋 Prerequisites
+
+- **Flutter SDK** installed and in PATH
+- **bash** shell environment (Linux/macOS/WSL)
+- **Basic tools**: find, base64, sed, grep
+
+## 🚀 Getting Started Guide
+
+1. **Verify Flutter Installation**
+   \`\`\`bash
+   flutter --version
+   flutter doctor
+   \`\`\`
+
+2. **Make Scripts Executable** (if needed)
+   \`\`\`bash
+   chmod +x flutter_app_builder.sh
+   chmod +x features/*.sh
+   chmod +x config/*.sh
+   \`\`\`
+
+3. **Create Your First App**
+   \`\`\`bash
+   ./flutter_app_builder.sh test_app
+   cd test_app
+   flutter run
+   \`\`\`
+
+## 🔍 Troubleshooting
+
+### Common Issues
+
+**Flutter not found:**
+\`\`\`bash
+# Ensure Flutter is in your PATH
+export PATH="\$PATH:/path/to/flutter/bin"
+\`\`\`
+
+**Permission denied:**
+\`\`\`bash
+# Make scripts executable
+chmod +x flutter_app_builder.sh features/*.sh config/*.sh
+\`\`\`
+
+**App already exists:**
+\`\`\`bash
+# Use clean flag to remove existing directory
+./flutter_app_builder.sh my_app --clean --recreate
+\`\`\`
+
+**Dependencies issues:**
+\`\`\`bash
+# Skip automatic pub get and run manually
+./flutter_app_builder.sh my_app --skip-deps
+cd my_app
+flutter clean
+flutter pub get
+\`\`\`
+
+### Debug Mode
+For verbose output, add to any script:
+\`\`\`bash
+set -x  # Enable debug tracing
+\`\`\`
+
+## 📖 Advanced Usage
+
+### Custom Feature Generation
+\`\`\`bash
+# Modify individual features
+vim features/auth_feature.sh
+
+# Run specific feature only
+./features/auth_feature.sh ./my_app false
+\`\`\`
+
+### Batch Processing
+\`\`\`bash
+# Create multiple apps
+for app in app1 app2 app3; do
+    ./flutter_app_builder.sh "\$app" --skip-doctor
+done
+\`\`\`
+
+### CI/CD Integration
+\`\`\`bash
+# Non-interactive usage
+./flutter_app_builder.sh production_app \\
+    --recreate \\
+    --skip-doctor \\
+    --clean
+\`\`\`
+
+## 📊 Extraction Statistics
+
+$([ -n "$extraction_stats" ] && echo "$extraction_stats" || echo "- Default app name: \`$app_name\`
+- Extraction mode: Feature-based architecture
+- Generated features: $(echo "$feature_list" | wc -w)
+- Configuration modules: $(echo "$config_list" | wc -w)")
+
+## 📝 Important Notes
+
+- **Update Mode**: Default behavior, preserves existing files
+- **Asset Handling**: Binary assets are base64-encoded for portability
+- **Cross-Platform**: Works on Linux, macOS, and Windows (WSL/Git Bash)
+- **Incremental**: Supports both full recreation and incremental updates
+- **Modular**: Each feature and config can run independently
+
+## 🤝 Support & Troubleshooting
+
+For issues with:
+- **Flutter itself**: [Flutter Documentation](https://flutter.dev/docs)
+- **Generated code**: Review original project structure
+- **Script errors**: Check file permissions and Flutter installation
+- **Feature extraction**: Verify original project follows supported patterns
+
+## 🔗 Useful Commands
+
+\`\`\`bash
+# Quick project recreation
+./flutter_app_builder.sh my_app --recreate --clean
+
+# Development workflow (preserve changes)
+./flutter_app_builder.sh my_app --update --skip-doctor
+
+# Feature-only update
+./flutter_app_builder.sh my_app --features-only
+
+# Debug a specific feature
+cd features && ./<feature>_feature.sh ../my_app false
+\`\`\`
+
+---
+
+**Generated by Flutter Code Extractor CLI v$VERSION**
+
+*Happy Flutter development! 🚀*
+EOF
+
+    print_success "README.md created at: $output_dir/README.md"
+}
