@@ -816,30 +816,52 @@ ENHANCED_MAIN_START
         echo "show_progress \$file_count \$total_files" >> "$output_script"
         echo "" >> "$output_script"
     fi
-    
-    # Process Dart files with progress
-    while IFS= read -r -d '' file; do
-        local relative_path="${file#$source_dir/}"
-        local dir_path=$(dirname "$relative_path")
-        
-        [ "$verbose" = true ] && show_progress $current_file $total_files
-        
-        # Create directory structure
-        if [ "$dir_path" != "." ]; then
-            echo "mkdir -p \"lib/$dir_path\"" >> "$output_script"
-        fi
-        
-        # Add file content with progress
-        echo "cat > 'lib/$relative_path' << 'DART_EOF'" >> "$output_script"
+    # ---- Feature-split block (v1.1.0) ----
+dart_files_count=0
+while IFS= read -r -d '' file; do
+    local relative_path="${file#$source_dir/}"
+    local filename=$(basename "$relative_path")
+    local feature_name
+
+    case "$relative_path" in
+        */screens/*|*/views/*) feature_name="screens" ;;
+        */models/*)            feature_name="models" ;;
+        */widgets/*)           feature_name="widgets" ;;
+        */services/*|*/repositories/*) feature_name="services" ;;
+        *)                     feature_name="${filename%_*}" ;;
+    esac
+
+    if [ "$feature_name" = "main" ]; then
+        dest_file="lib/$filename"
+        mkdir_cmd="mkdir -p lib"
+    else
+        dest_file="lib/features/$feature_name/$filename"
+        mkdir_cmd="mkdir -p lib/features/$feature_name"
+    fi
+
+    echo "$mkdir_cmd" >> "$output_script"
+
+    if [ "$recreate" = true ]; then
+        echo "cat > '$dest_file' << 'DART_EOF'" >> "$output_script"
         cat "$file" | escape_for_heredoc >> "$output_script"
         echo "DART_EOF" >> "$output_script"
-        echo "((file_count++))" >> "$output_script"
-        echo "show_progress \$file_count \$total_files" >> "$output_script"
-        echo "" >> "$output_script"
-        
-        ((current_file++))
-    done < <(find "$source_dir" -name "*.dart" -type f -print0)
-    
+        echo "print_status \"Created: $dest_file\"" >> "$output_script"
+    else
+        # incremental update
+        echo "tmpfile=\$(mktemp)" >> "$output_script"
+        echo "cat > \"\$tmpfile\" << 'DART_EOF'" >> "$output_script"
+        cat "$file" | escape_for_heredoc >> "$output_script"
+        echo "DART_EOF" >> "$output_script"
+        echo "if [ ! -f '$dest_file' ] || ! cmp -s \"\$tmpfile\" '$dest_file'; then" >> "$output_script"
+        echo "    mv \"\$tmpfile\" '$dest_file'" >> "$output_script"
+        echo "    print_status \"Updated: $dest_file\"" >> "$output_script"
+        echo "else" >> "$output_script"
+        echo "    rm \"\$tmpfile\"" >> "$output_script"
+        echo "    print_status \"No change, skipped: $dest_file\"" >> "$output_script"
+        echo "fi" >> "$output_script"
+    fi
+    ((dart_files_count++))
+done < <(find "$source_dir" -name "*.dart" -type f -print0)
     # Process test files if requested
     if [ "$include_tests" = true ] && [ -d "test" ]; then
         while IFS= read -r -d '' file; do
