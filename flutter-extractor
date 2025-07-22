@@ -425,6 +425,8 @@ show_help() {
     echo "  --docs                 Generate documentation"
     echo "  --exclude PATTERN      Exclude files matching pattern"
     echo "  --format FORMAT        Archive format (tar.gz, zip)"
+echo "  --split-features       Extract each logical feature into its own file under lib/features/"
+echo "  --recreate             Force overwrite existing files (default = update-in-place)"
     echo ""
     echo "TEMPLATE COMMANDS:"
     echo "  template list          List available templates"
@@ -491,11 +493,21 @@ extract_flutter_app() {
     local generate_docs=false
     local compression_level=6
     local archive_format="tar.gz"
+local split_features=false      # --split-features
+local recreate=false            # --recreate (forces overwrite)
     local exclude_patterns=()
     
     # Parse options
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --recreate)
+                recreate=true
+                shift
+                ;;
+            --split-features)
+                split_features=true
+                shift
+                ;;
             -s|--source)
                 source_dir="$2"
                 shift 2
@@ -684,6 +696,14 @@ CLEAN_EXISTING=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+            --recreate)
+                recreate=true
+                shift
+                ;;
+            --split-features)
+                split_features=true
+                shift
+                ;;
         -h|--help)
             show_help
             exit 0
@@ -1196,6 +1216,14 @@ case "${1:-help}" in
         local name=""
         while [[ $# -gt 0 ]]; do
             case $1 in
+            --recreate)
+                recreate=true
+                shift
+                ;;
+            --split-features)
+                split_features=true
+                shift
+                ;;
                 --format)
                     format="$2"
                     shift 2

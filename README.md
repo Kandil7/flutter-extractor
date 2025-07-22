@@ -65,6 +65,11 @@ flutter-extractor extract -p -a
 # Custom source directory and output file
 flutter-extractor extract -s ./packages/my_package -o my_backup.sh
 
+# Default: update existing features (only changed files are written)
+./flutter-extractor extract --split-features
+
+# Force full recreation (old behaviour)
+./flutter-extractor extract --split-features --recreate
 # Custom app name in generated script
 flutter-extractor extract -n MyAwesomeApp
 

@@ -1,0 +1,84 @@
+@@ -605,7 +605,8 @@ extract_flutter_app() {
+     local generate_docs=false
+     local compression_level=6
+     local archive_format="tar.gz"
+-    local split_features=false
++    local split_features=false      # --split-features
++    local recreate=false            # --recreate (forces overwrite)
+     local exclude_patterns=()
+ 
+     # Parse options
+@@ -660,6 +661,10 @@ extract_flutter_app() {
+                 split_features=true
+                 shift
+                 ;;
++            --recreate)                # NEW
++                recreate=true
++                shift
++                ;;
+             *)
+                 print_error "Unknown option: $1"
+                 exit 1
+@@ -992,6 +997,7 @@ cat > lib/main.dart << 'MAIN_EOF'
+ // Auto-generated feature aggregator
+ // Do not edit by hand
+ void main() => runApp(const MyApp());
++// ️⚙️  Updated in-place: $(date)
+ MAIN_EOF
+ FEATURES_SETUP
+     fi
+@@ -1028,7 +1034,7 @@ FEATURES_SETUP
+             echo "echo 'export \"features/$feature_name/$filename\";' >> lib/main.dart" >> "$output_script"
+ 
+             # Handle main.dart separately if it exists
+-            if [[ "$filename" == "main.dart" ]]; then
++            if [[ "$filename" == "main.dart" && "$recreate" = true ]]; then
+                 echo "echo '' > lib/main.dart" >> "$output_script"
+                 echo "cat >> lib/main.dart << 'MAIN_EOF'" >> "$output_script"
+                 cat "$file" | escape_for_heredoc >> "$output_script"
+@@ -1046,6 +1052,31 @@ FEATURES_SETUP
+             echo "cat > 'lib/$relative_path' << 'DART_EOF'" >> "$output_script"
+             cat "$file" | escape_for_heredoc >> "$output_script"
+             echo "DART_EOF" >> "$output_script"
++        else
++            # UPDATE MODE (default): only write if file changed
++            feature_name=$(feature_name_from_path "$relative_path")
++            echo "mkdir -p \"lib/features/$feature_name\"" >> "$output_script"
++
++            # Write to temp, compare, then move only if different
++            cat >> "$output_script" << 'UPDATE_LOGIC'
++tmpfile=$(mktemp)
++cat > "$tmpfile" << 'DART_EOF'
++UPDATE_LOGIC
++            cat "$file" | escape_for_heredoc >> "$output_script"
++            cat >> "$output_script" << 'UPDATE_LOGIC'
++DART_EOF
++dest="lib/features/$feature_name/$filename"
++if [ ! -f "$dest" ] || ! cmp -s "$tmpfile" "$dest"; then
++    mv "$tmpfile" "$dest"
++    echo "Updated $dest"
++else
++    rm "$tmpfile"
++    echo "No change, skipped $dest"
++fi
++UPDATE_LOGIC
++            # Always append export line (idempotent)
++            echo "echo 'export \"features/$feature_name/$filename\";' >> lib/main.dart" >> "$output_script"
+         fi
+@@ -1140,7 +1171,8 @@ main() {
+     [ "$include_tests" = true ] && echo "  ${GREEN}✓${NC} Test files included"
+     [ "$create_archive" = true ] && echo "  ${GREEN}✓${NC} Backup archive created"
+     [ "$generate_docs" = true ] && echo "  ${GREEN}✓${NC} Documentation generated"
+-    [ "$split_features" = true ] && echo "  ${GREEN}✓${NC} Features split into modules"
++    [ "$split_features" = true ] && echo "  ${GREEN}✓${NC} Features split/updated"
++    [ "$recreate" = true ] && echo "  ${YELLOW}⚠${NC} Recreate mode enabled (files overwritten)"
+ 
+     echo ""
+     print_success "Generator script: ${BOLD}$output_script${NC}"
+@@ -1185,6 +1217,7 @@ show_help() {
+     echo "  --format FORMAT        Archive format (tar.gz, zip)"
+     echo "  --split-features       Extract each logical feature into its own file under lib/features/"
++    echo "  --recreate           Force overwrite existing files (default = update-in-place)"
+     echo ""
+     echo "TEMPLATE COMMANDS:"
+     echo "  template list          List available templates"
