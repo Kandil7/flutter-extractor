@@ -1133,3 +1133,87 @@ EOF
 
     print_success "README.md created at: $output_dir/README.md"
 }
+# Main extraction function
+extract_flutter_app() {
+    local source_dir="${1:-.}"
+    local output_dir="${2:-flutter_extract}"
+    local app_name="${3:-extracted_flutter_app}"
+    local include_pubspec="${4:-false}"
+    local include_assets="${5:-false}"
+    local include_config="${6:-false}"
+    local include_tests="${7:-false}"
+    local force_overwrite="${8:-false}"
+    local verbose="${9:-false}"
+    local feature_based="${10:-true}"
+    local monolith="${11:-false}"
+    local recreate="${12:-false}"
+    local feature_pattern="${13:-features/*}"
+
+    # Validate source directory
+    if [ ! -d "$source_dir" ]; then
+        print_error "Source directory '$source_dir' not found!"
+        exit 1
+    fi
+
+    # Create output directory
+    mkdir -p "$output_dir"
+
+    # Initialize feature and config lists
+    local feature_scripts=""
+    local config_scripts=""
+
+    # Extract features
+    if [ "$feature_based" = true ]; then
+        local features=$(find "$source_dir/lib" -type d -name "$feature_pattern" -exec basename {} \;)
+        for feature in $features; do
+            local feature_files=$(find "$source_dir/lib/$feature" -type f -name "*.dart" -exec echo "{}" \;)
+            create_feature_script "$feature" "$output_dir" "$feature_files" "$recreate"
+            feature_scripts+="$output_dir/features/${feature}_feature.sh\n"
+        done
+    fi
+
+    # Extract configurations
+    if [ "$include_pubspec" = true ] && [ -f "$source_dir/pubspec.yaml" ]; then
+        create_config_script "pubspec" "$output_dir" "$(cat "$source_dir/pubspec.yaml")" "pubspec.yaml"
+        config_scripts+="$output_dir/config/pubspec_config.sh\n"
+    fi
+
+    if [ "$include_assets" = true ] && [ -d "$source_dir/assets" ]; then
+        create_assets_script "$output_dir" "$source_dir"
+        config_scripts+="$output_dir/config/assets_config.sh\n"
+    fi
+
+    # Create main builder script
+    create_main_builder "$output_dir" "$app_name" "$feature_scripts" "$config_scripts" "$recreate"
+
+    # Create README
+    create_readme "$output_dir" "$app_name" "$feature_scripts" "$config_scripts" ""
+
+    print_success "Extraction completed successfully!"
+    print_status "Output directory: $output_dir"
+}
+
+# Main command dispatcher
+case "${1:-help}" in
+    extract)
+        shift
+        extract_flutter_app "$@"
+        ;;
+    install)
+        install_cli
+        ;;
+    uninstall)
+        uninstall_cli
+        ;;
+    version)
+        show_version
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        print_error "Unknown command: $1"
+        show_help
+        exit 1
+        ;;
+esac
