@@ -70,6 +70,7 @@ flutter-extractor extract -s ./packages/my_package -o my_backup.sh
 
 # Force full recreation (old behaviour)
 ./flutter-extractor extract --split-features --recreate
+
 # Custom app name in generated script
 flutter-extractor extract -n MyAwesomeApp
 
