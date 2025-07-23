@@ -1382,20 +1382,37 @@ extract_command() {
             print_success "Created core feature script (${#core_files[@]} files)"
         fi
         
-        # Group files by feature
-        declare -A feature_map
+        # Group files by feature using temporary files instead of associative arrays
+        local tmp_dir
+        tmp_dir=$(mktemp -d)
+        
+        # Create a directory per feature
         for data in "${feature_files[@]}"; do
             local feature="${data%%|*}"
             local file_data="${data#*|}"
-            feature_map["$feature"]+="$file_data"$'\n'
+            mkdir -p "$tmp_dir/$feature"
+            echo "$file_data" >> "$tmp_dir/$feature/files.txt"
         done
         
         # Create individual feature scripts
-        for feature in "${!feature_map[@]}"; do
-            IFS=$'\n' read -r -d '' -a files <<< "${feature_map[$feature]}"
+        for feature_dir in "$tmp_dir"/*; do
+            [ ! -d "$feature_dir" ] && continue
+            
+            local feature
+            feature=$(basename "$feature_dir")
+            
+            # Read files into array
+            local files=()
+            while IFS= read -r line; do
+                files+=("$line")
+            done < "$feature_dir/files.txt"
+            
             create_feature_script "$feature" "$output_dir" "$update_mode" "${files[@]}"
             print_success "Created $feature feature script (${#files[@]} files)"
         done
+        
+        # Clean up temporary directory
+        rm -rf "$tmp_dir"
     else
         # Monolithic mode - single core feature
         if [ ${#core_files[@]} -gt 0 ]; then
@@ -1403,6 +1420,8 @@ extract_command() {
             print_success "Created monolithic script (${#core_files[@]} files)"
         fi
     fi
+
+  
     
     # Create pubspec script if enabled
     if [ "$include_pubspec" = true ] && [ -f "$source_dir/pubspec.yaml" ]; then
