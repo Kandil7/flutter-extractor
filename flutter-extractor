@@ -610,7 +610,7 @@ local total_files=0 total_size=0
 if [[ -d "$src/lib" ]]; then
   while IFS= read -r -d '' file; do
     rel=$(get_relative_path "$file" "$src")
-    should_exclude_file "$rel" "${exclude_patterns[@]}" && continue
+    should_exclude_file "$rel" "${exclude_patterns[@]:-}" && continue
     feature=$(extract_feature_name "$rel" "$feature_pattern")
     payload="$rel|$(cat "$file")"
 
@@ -677,7 +677,7 @@ EOF
   [[ "$pubspec" == "true" && -f "$src/pubspec.yaml" ]] && \
     create_config_script "pubspec" "$out" "$(cat "$src/pubspec.yaml")" "pubspec.yaml"
   [[ "$assets" == "true" && -d "$src/assets" ]] && \
-    create_assets_script "$out" "$src" "${exclude_patterns[@]}"
+    create_assets_script "$out" "$src" "${exclude_patterns[@]:-}"
 
   # Tests
   if [[ "$tests" == "true" && -d "$src/test" ]]; then
@@ -685,7 +685,7 @@ EOF
     while IFS= read -r -d '' file; do
       local rel
       rel=$(get_relative_path "$file" "$src")
-      should_exclude_file "$rel" "${exclude_patterns[@]}" && continue
+      should_exclude_file "$rel" "${exclude_patterns[@]:-}" && continue
       test_entries+=("$rel|$(cat "$file")")
     done < <(find "$src/test" -type f -name "*.dart" -print0)
     [[ ${#test_entries[@]} -gt 0 ]] && \
