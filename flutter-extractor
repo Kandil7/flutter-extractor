@@ -735,7 +735,7 @@ fi
 # Check if Flutter is installed
 if ! command -v flutter &> /dev/null; then
     print_error "Flutter is not installed or not in PATH"
-    print_error "Please install Flutter: https://flutter.dev/docs/get-started/install"
+    print_error "Please install Flutter: https://flutter.dev/docs/get-started/install  "
     exit 1
 fi
 
@@ -854,6 +854,7 @@ EOF
 
     chmod +x "$script_path"
 }
+
 # Function to create README
 create_readme() {
     local output_dir="$1"
@@ -1103,7 +1104,7 @@ $([ -n "$extraction_stats" ] && echo "$extraction_stats" || echo "- Default app 
 ## 🤝 Support & Troubleshooting
 
 For issues with:
-- **Flutter itself**: [Flutter Documentation](https://flutter.dev/docs)
+- **Flutter itself**: [Flutter Documentation](https://flutter.dev/docs  )
 - **Generated code**: Review original project structure
 - **Script errors**: Check file permissions and Flutter installation
 - **Feature extraction**: Verify original project follows supported patterns
@@ -1133,6 +1134,7 @@ EOF
 
     print_success "README.md created at: $output_dir/README.md"
 }
+
 # Main extraction function
 extract_flutter_app() {
     local source_dir="${1:-.}"
