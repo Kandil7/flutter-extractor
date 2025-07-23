@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # Flutter Code Extractor CLI Tool
-# A global CLI tool to extract and recreate Flutter apps with feature-based architecture
-# Version: 2.1.0
+# A global CLI tool to extract and recreate Flutter apps
+# Version: 2.0.0
 
 set -euo pipefail
 
-VERSION="2.1.0"
+VERSION="2.0.0"
 TOOL_NAME="flutter-extractor"
 
 # Colors for output
@@ -197,7 +197,7 @@ uninstall_cli() {
 # Function to escape content for bash heredoc
 escape_for_heredoc() {
     # More robust escaping
-    sed 's/\\/\\\\/g' | sed "s/'/'\\\\''/g" | sed 's/`/\\`/g'
+    sed -e 's/\\/\\\\/g' -e "s/'/'\\\\''/g" -e 's/`/\\`/g'
 }
 
 # Function to validate Flutter project
@@ -1160,8 +1160,12 @@ EOF
 
     print_success "README.md created at: $output_dir/README.md"
 }
+
 # Extract command
 extract_command() {
+    # Initialize exclude_patterns as an empty array
+    local exclude_patterns=()
+    
     # Parse extract options
     local source_dir="."
     local output_dir="flutter_extract"
@@ -1174,7 +1178,6 @@ extract_command() {
     local feature_based=true
     local update_mode=true
     local feature_pattern="features/*"
-    local exclude_patterns=()
     
     # Shift out the 'extract' command
     shift
