@@ -1374,14 +1374,19 @@ extract_command() {
         done < <(find "$source_dir/test" -type f -print0 2>/dev/null || true)
     fi
     
-    # Create feature scripts
-    if [ "$feature_based" = true ]; then
-        # Create core feature
-        if [ ${#core_files[@]} -gt 0 ]; then
-            create_feature_script "core" "$output_dir" "$update_mode" "${core_files[@]}"
-            print_success "Created core feature script (${#core_files[@]} files)"
-        fi
-        
+   # Create feature scripts
+if [ "$feature_based" = true ]; then
+    # Create core feature
+    if [ ${#core_files[@]} -gt 0 ]; then
+        create_feature_script "core" "$output_dir" "$update_mode" "${core_files[@]}"
+        print_success "Created core feature script (${#core_files[@]} files)"
+    fi
+    
+    # Initialize feature_files as empty array
+    local feature_files=()
+    
+    # Only process feature files if we have any
+    if [ ${#feature_files[@]} -gt 0 ]; then
         # Group files by feature using temporary files instead of associative arrays
         local tmp_dir
         tmp_dir=$(mktemp -d)
@@ -1413,13 +1418,14 @@ extract_command() {
         
         # Clean up temporary directory
         rm -rf "$tmp_dir"
-    else
-        # Monolithic mode - single core feature
-        if [ ${#core_files[@]} -gt 0 ]; then
-            create_feature_script "core" "$output_dir" "$update_mode" "${core_files[@]}"
-            print_success "Created monolithic script (${#core_files[@]} files)"
-        fi
     fi
+else
+    # Monolithic mode - single core feature
+    if [ ${#core_files[@]} -gt 0 ]; then
+        create_feature_script "core" "$output_dir" "$update_mode" "${core_files[@]}"
+        print_success "Created monolithic script (${#core_files[@]} files)"
+    fi
+fi
 
   
     
