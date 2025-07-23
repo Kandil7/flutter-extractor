@@ -603,23 +603,24 @@ cmd_extract() {
   [[ "$update_mode" == "true" ]] && print_status "Mode: Update (preserve existing files)" \
     || print_status "Mode: Recreate (overwrite all files)"
 
-  local -A feature_files
-  local total_files=0 total_size=0
+  # Collect lib files (bash 3.2-safe)
+local -a feature_files_order feature_files_payload
+local total_files=0 total_size=0
 
-  # Collect lib files
-  if [[ -d "$src/lib" ]]; then
-    while IFS= read -r -d '' file; do
-      local rel
-      rel=$(get_relative_path "$file" "$src")
-      should_exclude_file "$rel" "${exclude_patterns[@]}" && continue
-      local feature
-      feature=$(extract_feature_name "$rel" "$feature_pattern")
-      local payload="$rel|$(cat "$file")"
-      feature_files["$feature"]+="$payload"$'\n'
-      ((total_files++))
-      total_size=$(("$total_size" + $(stat -c%s "$file" 2>/dev/null || stat -f%z "$file")))
-    done < <(find "$src/lib" -type f -name "*.dart" -print0)
-  fi
+if [[ -d "$src/lib" ]]; then
+  while IFS= read -r -d '' file; do
+    rel=$(get_relative_path "$file" "$src")
+    should_exclude_file "$rel" "${exclude_patterns[@]}" && continue
+    feature=$(extract_feature_name "$rel" "$feature_pattern")
+    payload="$rel|$(cat "$file")"
+
+    feature_files_order+=("$feature")
+    feature_files_payload+=("$payload")
+
+    ((total_files++))
+    total_size=$(("$total_size" + $(stat -c%s "$file" 2>/dev/null || stat -f%z "$file")))
+  done < <(find "$src/lib" -type f -name "*.dart" -print0)
+fi
 
   # Create feature scripts
   for feature in "${!feature_files[@]}"; do
