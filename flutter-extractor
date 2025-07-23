@@ -922,10 +922,12 @@ create_readme() {
     local output_dir="$1"
     local app_name="$2"
     local extraction_stats="$3"
+    
+    # Initialize as empty arrays
     local feature_list=()
     local config_list=()
     
-    # Get feature and config lists
+    # Get feature list
     if [ -d "$output_dir/features" ]; then
         while IFS= read -r -d '' script; do
             local feature_name
@@ -934,6 +936,7 @@ create_readme() {
         done < <(find "$output_dir/features" -name "*_feature.sh" -print0 2>/dev/null || true)
     fi
     
+    # Get config list
     if [ -d "$output_dir/config" ]; then
         while IFS= read -r -d '' script; do
             local config_name
@@ -941,6 +944,7 @@ create_readme() {
             config_list+=("$config_name")
         done < <(find "$output_dir/config" -name "*_config.sh" -print0 2>/dev/null || true)
     fi
+    
     
     cat > "$output_dir/README.md" << EOF
 # Flutter App Extractor Bundle
