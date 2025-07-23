@@ -291,7 +291,7 @@ extract_feature_name() {
 create_feature_script() {
     local feature_name="$1"
     local output_dir="$2"
-    local feature_files="$3"
+    local files_list="$3"
     local update_mode="$4"
     
     local script_path="$output_dir/features/${feature_name}_feature.sh"
@@ -334,7 +334,7 @@ generate_${feature_name}_feature() {
 EOF
 
     # Add file generation logic
-    echo "$feature_files" | while IFS='|' read -r file_path file_content; do
+    echo "$files_list" | while IFS='|' read -r file_path file_content; do
         [ -z "$file_path" ] && continue
         
         local dir_path=$(dirname "$file_path")
@@ -1157,49 +1157,239 @@ extract_flutter_app() {
         exit 1
     fi
 
+    # Validate it's a Flutter project
+    if ! validate_flutter_project "$source_dir"; then
+        print_error "Not a valid Flutter project: $source_dir"
+        print_error "Missing pubspec.yaml with flutter dependency or lib directory"
+        exit 1
+    fi
+
+    # Check output directory
+    if [ -d "$output_dir" ] && [ "$force_overwrite" = false ]; then
+        print_error "Output directory '$output_dir' already exists!"
+        print_status "Use --force to overwrite or specify a different output"
+        exit 1
+    fi
+
     # Create output directory
-    mkdir -p "$output_dir"
+    mkdir -p "$output_dir/features"
+    mkdir -p "$output_dir/config"
 
-    # Initialize feature and config lists
-    local feature_scripts=""
-    local config_scripts=""
+    # Initialize variables
+    local feature_list=""
+    local config_list=""
+    local extraction_stats=""
+    local feature_files=""
+    local file_count=0
+    local feature_count=0
 
-    # Extract features
-    if [ "$feature_based" = true ]; then
-        local features=$(find "$source_dir/lib" -type d -name "$feature_pattern" -exec basename {} \;)
-        for feature in $features; do
-            local feature_files=$(find "$source_dir/lib/$feature" -type f -name "*.dart" -exec echo "{}" \;)
-            create_feature_script "$feature" "$output_dir" "$feature_files" "$recreate"
-            feature_scripts+="$output_dir/features/${feature}_feature.sh\n"
+    # Process Dart files
+    while IFS= read -r -d $'\0' file; do
+        # Skip hidden files and directories
+        [[ "$file" == *"/."* ]] && continue
+        
+        # Get relative path
+        local rel_path=$(get_relative_path "$file" "$source_dir")
+        
+        # Extract feature name
+        local feature=$(extract_feature_name "$rel_path" "$feature_pattern")
+        
+        # Get file content
+        local content=$(escape_for_heredoc < "$file")
+        
+        # Add to feature files
+        feature_files+="$rel_path|$content\n"
+        
+        # Add to feature list
+        if [[ ! "$feature_list" == *"$feature"* ]]; then
+            feature_list+="$feature\n"
+            ((feature_count++))
+        fi
+        
+        ((file_count++))
+    done < <(find "$source_dir/lib" -type f -name "*.dart" -print0)
+    
+    # Process tests if enabled
+    if [ "$include_tests" = true ]; then
+        while IFS= read -r -d $'\0' file; do
+            # Skip hidden files and directories
+            [[ "$file" == *"/."* ]] && continue
+            
+            # Get relative path
+            local rel_path=$(get_relative_path "$file" "$source_dir")
+            
+            # Extract feature name
+            local feature=$(extract_feature_name "$rel_path" "$feature_pattern")
+            
+            # Get file content
+            local content=$(escape_for_heredoc < "$file")
+            
+            # Add to feature files
+            feature_files+="$rel_path|$content\n"
+            
+            # Add to feature list
+            if [[ ! "$feature_list" == *"$feature"* ]]; then
+                feature_list+="$feature\n"
+                ((feature_count++))
+            fi
+            
+            ((file_count++))
+        done < <(find "$source_dir/test" -type f -name "*.dart" -print0)
+    fi
+    
+    # Create feature scripts
+    if [ -n "$feature_files" ]; then
+        echo -e "$feature_files" | while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            local file_path="${line%%|*}"
+            local feature=$(extract_feature_name "$file_path" "$feature_pattern")
+            
+            # Group files by feature
+            if [ "$monolith" = true ]; then
+                feature="monolith"
+            fi
+            
+            # Create feature script
+            create_feature_script "$feature" "$output_dir" "$line" "$recreate"
         done
     fi
 
-    # Extract configurations
+    # Create pubspec config if enabled
     if [ "$include_pubspec" = true ] && [ -f "$source_dir/pubspec.yaml" ]; then
         create_config_script "pubspec" "$output_dir" "$(cat "$source_dir/pubspec.yaml")" "pubspec.yaml"
-        config_scripts+="$output_dir/config/pubspec_config.sh\n"
+        config_list+="pubspec\n"
     fi
 
+    # Create assets config if enabled
     if [ "$include_assets" = true ] && [ -d "$source_dir/assets" ]; then
         create_assets_script "$output_dir" "$source_dir"
-        config_scripts+="$output_dir/config/assets_config.sh\n"
+        config_list+="assets\n"
     fi
 
-    # Create main builder script
+    # Create project config if enabled
+    if [ "$include_config" = true ]; then
+        if [ -f "$source_dir/analysis_options.yaml" ]; then
+            create_config_script "analysis" "$output_dir" "$(cat "$source_dir/analysis_options.yaml")" "analysis_options.yaml"
+            config_list+="analysis\n"
+        fi
+        if [ -f "$source_dir/.gitignore" ]; then
+            create_config_script "gitignore" "$output_dir" "$(cat "$source_dir/.gitignore")" ".gitignore"
+            config_list+="gitignore\n"
+        fi
+    fi
+
+    # Create main builder
+    local feature_scripts=$(find "$output_dir/features" -name "*_feature.sh" -printf "%f\n")
+    local config_scripts=$(find "$output_dir/config" -name "*_config.sh" -printf "%f\n")
     create_main_builder "$output_dir" "$app_name" "$feature_scripts" "$config_scripts" "$recreate"
 
     # Create README
-    create_readme "$output_dir" "$app_name" "$feature_scripts" "$config_scripts" ""
+    extraction_stats="Extracted $file_count files into $feature_count features"
+    create_readme "$output_dir" "$app_name" "$(echo -e "$feature_list" | sort | uniq)" "$(echo -e "$config_list" | sort | uniq)" "$extraction_stats"
 
     print_success "Extraction completed successfully!"
     print_status "Output directory: $output_dir"
+    print_status "Extracted $file_count files into $feature_count features"
 }
 
 # Main command dispatcher
 case "${1:-help}" in
     extract)
         shift
-        extract_flutter_app "$@"
+        # Parse options
+        local source_dir="."
+        local output_dir="flutter_extract"
+        local app_name="extracted_flutter_app"
+        local include_pubspec=false
+        local include_assets=false
+        local include_config=false
+        local include_tests=false
+        local force_overwrite=false
+        local verbose=false
+        local feature_based=true
+        local monolith=false
+        local recreate=false
+        local feature_pattern="features/*"
+
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                -s|--source)
+                    source_dir="$2"
+                    shift 2
+                    ;;
+                -o|--output)
+                    output_dir="$2"
+                    shift 2
+                    ;;
+                -n|--name)
+                    app_name="$2"
+                    shift 2
+                    ;;
+                -p|--pubspec)
+                    include_pubspec=true
+                    shift
+                    ;;
+                -a|--assets)
+                    include_assets=true
+                    shift
+                    ;;
+                -c|--config)
+                    include_config=true
+                    shift
+                    ;;
+                -t|--tests)
+                    include_tests=true
+                    shift
+                    ;;
+                -f|--force)
+                    force_overwrite=true
+                    shift
+                    ;;
+                -v|--verbose)
+                    verbose=true
+                    shift
+                    ;;
+                --features)
+                    feature_based=true
+                    monolith=false
+                    shift
+                    ;;
+                --monolith)
+                    monolith=true
+                    feature_based=false
+                    shift
+                    ;;
+                --recreate)
+                    recreate=true
+                    shift
+                    ;;
+                --feature-pattern)
+                    feature_pattern="$2"
+                    shift 2
+                    ;;
+                *)
+                    print_error "Unknown option: $1"
+                    show_help
+                    exit 1
+                    ;;
+            esac
+        done
+
+        # Run extraction
+        extract_flutter_app \
+            "$source_dir" \
+            "$output_dir" \
+            "$app_name" \
+            "$include_pubspec" \
+            "$include_assets" \
+            "$include_config" \
+            "$include_tests" \
+            "$force_overwrite" \
+            "$verbose" \
+            "$feature_based" \
+            "$monolith" \
+            "$recreate" \
+            "$feature_pattern"
         ;;
     install)
         install_cli
