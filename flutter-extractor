@@ -1136,6 +1136,7 @@ EOF
 }
 
 # Main extraction function
+# Main extraction function
 extract_flutter_app() {
     local source_dir="${1:-.}"
     local output_dir="${2:-flutter_extract}"
@@ -1239,7 +1240,9 @@ extract_flutter_app() {
     
     # Create feature scripts
     if [ -n "$feature_files" ]; then
-        echo -e "$feature_files" | while IFS= read -r line; do
+        # Use a temporary variable to hold feature files during processing
+        local temp_feature_files="$feature_files"
+        while IFS= read -r line; do
             [ -z "$line" ] && continue
             local file_path="${line%%|*}"
             local feature=$(extract_feature_name "$file_path" "$feature_pattern")
@@ -1251,8 +1254,10 @@ extract_flutter_app() {
             
             # Create feature script
             create_feature_script "$feature" "$output_dir" "$line" "$recreate"
-        done
+        done <<< "$temp_feature_files"
     fi
+
+
 
     # Create pubspec config if enabled
     if [ "$include_pubspec" = true ] && [ -f "$source_dir/pubspec.yaml" ]; then
