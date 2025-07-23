@@ -1161,7 +1161,6 @@ EOF
     print_success "README.md created at: $output_dir/README.md"
 }
 
-# Extract command
 extract_command() {
     # Initialize exclude_patterns as an empty array
     local exclude_patterns=()
@@ -1307,8 +1306,8 @@ extract_command() {
         local relative_path
         relative_path=$(get_relative_path "$file" "$source_dir/lib")
         
-        # Check if file should be excluded
-        if should_exclude_file "$relative_path" "${exclude_patterns[@]}"; then
+        # Safe check for exclusions (handles empty array)
+        if [[ ${#exclude_patterns[@]} -gt 0 ]] && should_exclude_file "$relative_path" "${exclude_patterns[@]}"; then
             print_verbose "Excluded: $relative_path"
             ((excluded_files++))
             continue
@@ -1347,8 +1346,8 @@ extract_command() {
             local relative_path
             relative_path=$(get_relative_path "$file" "$source_dir/test")
             
-            # Check if file should be excluded
-            if should_exclude_file "$relative_path" "${exclude_patterns[@]}"; then
+            # Safe check for exclusions (handles empty array)
+            if [[ ${#exclude_patterns[@]} -gt 0 ]] && should_exclude_file "$relative_path" "${exclude_patterns[@]}"; then
                 print_verbose "Excluded: $relative_path"
                 ((excluded_files++))
                 continue
