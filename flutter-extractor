@@ -603,16 +603,19 @@ create_main_builder() {
     local output_dir="$1"
     local app_name="$2"
     local update_mode="$3"
+    
+    # Initialize as empty arrays
     local feature_scripts=()
     local config_scripts=()
     
-    # Get feature and config scripts
+    # Get feature scripts
     if [ -d "$output_dir/features" ]; then
         while IFS= read -r -d '' script; do
             feature_scripts+=("$(basename "$script")")
         done < <(find "$output_dir/features" -name "*_feature.sh" -print0 2>/dev/null || true)
     fi
     
+    # Get config scripts
     if [ -d "$output_dir/config" ]; then
         while IFS= read -r -d '' script; do
             config_scripts+=("$(basename "$script")")
