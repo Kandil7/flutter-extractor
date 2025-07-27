@@ -21,19 +21,19 @@ A powerful CLI tool to extract and recreate Flutter applications. Perfect for ba
 
 ### One-line install (Recommended)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kandil7/flutter-extractor/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/flutter-extractor/main/install.sh | bash
 ```
 
 ### Manual install
 ```bash
-curl -o flutter-extractor https://raw.githubusercontent.com/Kandil7/flutter-extractor/main/flutter-extractor
+curl -o flutter-extractor https://raw.githubusercontent.com/YOUR_USERNAME/flutter-extractor/main/flutter-extractor
 chmod +x flutter-extractor
 ./flutter-extractor install
 ```
 
 ### Local install (offline)
 ```bash
-git clone https://github.com/Kandil7/flutter-extractor.git
+git clone https://github.com/YOUR_USERNAME/flutter-extractor.git
 cd flutter-extractor
 ./install-local.sh
 ```
@@ -64,12 +64,6 @@ flutter-extractor extract -p -a
 
 # Custom source directory and output file
 flutter-extractor extract -s ./packages/my_package -o my_backup.sh
-
-# Default: update existing features (only changed files are written)
-./flutter-extractor extract --split-features
-
-# Force full recreation (old behaviour)
-./flutter-extractor extract --split-features --recreate
 
 # Custom app name in generated script
 flutter-extractor extract -n MyAwesomeApp
@@ -245,8 +239,8 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 📞 Support
 
-- 📫 **Issues**: [GitHub Issues](https://github.com/Kandil7/flutter-extractor/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/Kandil7/flutter-extractor/discussions)
+- 📫 **Issues**: [GitHub Issues](https://github.com/YOUR_USERNAME/flutter-extractor/issues)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/YOUR_USERNAME/flutter-extractor/discussions)
 - 📖 **Documentation**: This README and `flutter-extractor help`
 
 ## 🏷️ Changelog
